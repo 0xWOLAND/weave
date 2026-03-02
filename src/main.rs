@@ -17,6 +17,15 @@ fn blur(view: View<impl Grid<Elem = f32>>) -> f32 {
     sum / count
 }
 
+fn crop(view: View<impl Grid<Elem = f32>>) -> Option<f32> {
+    let x = view.x();
+    let y = view.y();
+    let w = view.width();
+    let h = view.height();
+
+    (x > w / 4 && x < 3 * w / 4 && y > h / 4 && y < 3 * h / 4).then(|| view.extract())
+}
+
 pub fn main() {
     let img = ImageReader::open("image.png").unwrap().decode().unwrap().to_luma8();
     let width = img.width() as usize;
@@ -26,6 +35,8 @@ pub fn main() {
 
     let result = img
         .extend(blur)
+        .extend(crop)
+        .map(|x| x.unwrap_or(0.0))
         .map(|x| x.sqrt());
 
     let output = materialize(result);

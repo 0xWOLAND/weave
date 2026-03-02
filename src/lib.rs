@@ -25,6 +25,16 @@ pub trait Grid {
     {
         Extend { grid: self, f, _marker: PhantomData }
     }
+
+    fn zip<H>(self, other: H) -> Zip<Self, H>
+    where
+        Self: Sized,
+        H: Grid,
+    {
+        assert_eq!(self.width(), other.width());
+        assert_eq!(self.height(), other.height());
+        Zip { left: self, right: other }
+    }
 }
 
 #[derive(Clone)]
@@ -60,6 +70,22 @@ pub struct View<'a, G: Grid> {
 }
 
 impl<'a, G: Grid> View<'a, G> {
+    pub fn x(&self) -> usize {
+        self.x
+    }
+
+    pub fn y(&self) -> usize {
+        self.y
+    }
+
+    pub fn width(&self) -> usize {
+        self.grid.width()
+    }
+
+    pub fn height(&self) -> usize {
+        self.grid.height()
+    }
+
     pub fn extract(&self) -> G::Elem {
         self.grid.at(self.x, self.y)
     }
@@ -108,6 +134,26 @@ pub struct Extend<G, F, B> {
     grid: G,
     f: F,
     _marker: PhantomData<B>,
+}
+
+pub struct Zip<G, H> {
+    left: G,
+    right: H,
+}
+
+impl<G, H> Grid for Zip<G, H>
+where
+    G: Grid,
+    H: Grid,
+{
+    type Elem = (G::Elem, H::Elem);
+
+    fn width(&self) -> usize { self.left.width() }
+    fn height(&self) -> usize { self.left.height() }
+
+    fn at(&self, x: usize, y: usize) -> Self::Elem {
+        (self.left.at(x, y), self.right.at(x, y))
+    }
 }
 
 impl<G, F, B> Grid for Extend<G, F, B>
