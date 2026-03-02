@@ -1,46 +1,48 @@
-use image::ImageReader;
-use weave::{Grid, Image, View, materialize};
+use std::fs::File;
+use image::{Delay, Frame, RgbaImage, codecs::gif::{GifEncoder, Repeat}};
+use weave::{Field, Grid, Image, Representable, View, materialize};
 
-fn blur(view: View<impl Grid<Elem = f32>>) -> f32 {
-    let mut sum = 0.0;
-    let mut count = 0.0;
-
-    for dy in -1..=1 {
-        for dx in -1..=1 {
-            if let Some(v) = view.get(dx, dy) {
-                sum += v;
-                count += 1.0;
-            }
-        }
-    }
-
-    sum / count
+fn laplacian(view: View<impl Grid<Elem = f32>>) -> f32 {
+    let u = view.extract();
+    view.get(-1, 0).unwrap_or(u)
+        + view.get(1, 0).unwrap_or(u)
+        + view.get(0, -1).unwrap_or(u)
+        + view.get(0, 1).unwrap_or(u)
+        - 4.0 * u
 }
 
-fn crop(view: View<impl Grid<Elem = f32>>) -> Option<f32> {
-    let x = view.x();
-    let y = view.y();
-    let w = view.width();
-    let h = view.height();
+fn step((u, lap): (f32, f32)) -> f32 {
+    u + 0.1 * lap
+}
 
-    (x > w / 4 && x < 3 * w / 4 && y > h / 4 && y < 3 * h / 4).then(|| view.extract())
+fn advance<G: Grid<Elem = f32> + Clone>(grid: G) -> Image<f32> {
+    materialize(grid.clone().zip(grid.extend(laplacian)).map(step))
 }
 
 pub fn main() {
-    let img = ImageReader::open("image.png").unwrap().decode().unwrap().to_luma8();
-    let width = img.width() as usize;
-    let height = img.height() as usize;
-    let img: Vec<f32> = img.into_raw().into_iter().map(|v| v as f32 / 255.0).collect();
-    let img = Image::new(width, height, img);
+    const W: usize = 256;
+    const H: usize = 256;
 
-    let result = img
-        .extend(blur)
-        .extend(crop)
-        .map(|x| x.unwrap_or(0.0))
-        .map(|x| x.sqrt());
+    let img = Field::<W, H, f32>::tabulate(|(x, y)| {
+        1000.0 * ((x, y) == (W / 2, H / 2)) as u8 as f32
+    });
 
-    let output = materialize(result);
-    let output_img = output.data.into_iter().map(|v| (v * 255.0) as u8).collect();
-    let output_img = image::GrayImage::from_raw(width as u32, height as u32, output_img).unwrap();
-    output_img.save("output.png").unwrap();
+    let mut state = materialize(img);
+    let mut gif = GifEncoder::new(File::create("output.gif").unwrap());
+    gif.set_repeat(Repeat::Infinite).unwrap();
+
+    for _ in 0..(1<<8){
+        state = advance(state);
+        let pixels = state.data.iter().flat_map(|&v| {
+            let u = (v.sqrt() * 255.0) as u8;
+            [u, u, u, 255]
+        }).collect();
+        let frame = Frame::from_parts(
+            RgbaImage::from_raw(W as u32, H as u32, pixels).unwrap(),
+            0,
+            0,
+            Delay::from_numer_denom_ms(30, 1),
+        );
+        gif.encode_frame(frame).unwrap();
+    }
 }

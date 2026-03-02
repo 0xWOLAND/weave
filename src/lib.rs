@@ -37,6 +37,14 @@ pub trait Grid {
     }
 }
 
+pub trait Representable: Grid {
+    type Index: Copy;
+
+    fn index(&self, i: Self::Index) -> Self::Elem;
+
+    fn tabulate(f: impl Fn(Self::Index) -> Self::Elem) -> Self;
+}
+
 #[derive(Clone)]
 pub struct Image<T: Copy> {
     width: usize,
@@ -59,6 +67,42 @@ impl<T: Copy> Grid for Image<T> {
 
     fn at(&self, x: usize, y: usize) -> T {
         self.data[y * self.width + x]
+    }
+}
+
+#[derive(Clone)]
+pub struct Field<const W: usize, const H: usize, T: Copy> {
+    data: Vec<T>,
+}
+
+impl<const W: usize, const H: usize, T: Copy> Grid for Field<W, H, T> {
+    type Elem = T;
+
+    fn width(&self) -> usize { W }
+    fn height(&self) -> usize { H }
+
+    fn at(&self, x: usize, y: usize) -> T {
+        self.data[y * W + x]
+    }
+}
+
+impl<const W: usize, const H: usize, T: Copy> Representable for Field<W, H, T> {
+    type Index = (usize, usize);
+
+    fn index(&self, (x, y): Self::Index) -> Self::Elem {
+        <Self as Grid>::at(self, x, y)
+    }
+
+    fn tabulate(f: impl Fn(Self::Index) -> Self::Elem) -> Self {
+        let mut data = Vec::with_capacity(W * H);
+
+        for y in 0..H {
+            for x in 0..W {
+                data.push(f((x, y)));
+            }
+        }
+
+        Self { data }
     }
 }
 
