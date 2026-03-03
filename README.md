@@ -2,4 +2,4 @@
 
 Rusty type-theoretic image processing
 
-![heat](output.gif)
+![heat](output.png)

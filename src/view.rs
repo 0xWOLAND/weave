@@ -1,3 +1,5 @@
+use std::iter::successors;
+
 use crate::{GridLike, Store};
 
 #[derive(Clone, Copy)]
@@ -38,6 +40,14 @@ impl<G: GridLike<N>, const N: usize> View<G, N> {
         }
 
         Some(self.grid.at(next))
+    }
+
+    pub fn iterate<A, F>(&self, seed: A, step: F) -> impl Iterator<Item = A>
+    where
+        A: Copy,
+        F: Fn(A) -> A,
+    {
+        successors(Some(seed), move |&state| Some(step(state)))
     }
 }
 
