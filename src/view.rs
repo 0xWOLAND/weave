@@ -1,56 +1,49 @@
-use crate::{Grid, Store};
+use crate::{GridLike, Store};
 
 #[derive(Clone, Copy)]
-pub struct View<G: Grid> {
+pub struct View<G: GridLike<N>, const N: usize> {
     grid: G,
-    x: usize,
-    y: usize,
+    position: [usize; N],
 }
 
-impl<G: Grid> View<G> {
-    pub fn new(grid: G, x: usize, y: usize) -> Self {
-        Self { grid, x, y }
+impl<G: GridLike<N>, const N: usize> View<G, N> {
+    pub fn new(grid: G, position: [usize; N]) -> Self {
+        Self { grid, position }
     }
 
-    pub fn x(&self) -> usize {
-        self.x
+    pub fn shape(&self) -> crate::grid::Shape<N> {
+        self.grid.shape()
     }
 
-    pub fn y(&self) -> usize {
-        self.y
-    }
-
-    pub fn width(&self) -> usize {
-        self.grid.width()
-    }
-
-    pub fn height(&self) -> usize {
-        self.grid.height()
+    pub fn position(&self) -> [usize; N] {
+        self.position
     }
 
     pub fn extract(&self) -> G::Elem {
-        self.grid.at(self.x, self.y)
+        self.grid.at(self.position)
     }
 
-    pub fn get(&self, dx: isize, dy: isize) -> Option<G::Elem> {
-        let nx = self.x as isize + dx;
-        let ny = self.y as isize + dy;
+    pub fn get(&self, offset: [isize; N]) -> Option<G::Elem> {
+        let mut next = [0; N];
+        let shape = self.grid.shape();
 
-        if nx >= 0
-            && ny >= 0
-            && nx < self.grid.width() as isize
-            && ny < self.grid.height() as isize
-        {
-            Some(self.grid.at(nx as usize, ny as usize))
-        } else {
-            None
+        for axis in 0..N {
+            let coord = self.position[axis] as isize + offset[axis];
+
+            if coord < 0 || coord >= shape.0[axis] as isize {
+                return None;
+            }
+
+            next[axis] = coord as usize;
         }
+
+        Some(self.grid.at(next))
     }
 }
 
-impl<'a, G: Grid> From<View<&'a G>> for Store<'a, (usize, usize), G::Elem> {
-    fn from(view: View<&'a G>) -> Self {
+impl<'a, G: GridLike<N>, const N: usize> From<View<&'a G, N>> for Store<'a, [usize; N], G::Elem> {
+    fn from(view: View<&'a G, N>) -> Self {
         let grid = view.grid;
-        Store::new((view.x, view.y), move |(x, y)| grid.at(x, y))
+        Store::new(view.position, move |position| grid.at(position))
     }
 }

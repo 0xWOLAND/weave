@@ -4,8 +4,8 @@ mod reader;
 mod store;
 mod view;
 
-pub use grid::{Duplicate, Grid, GridIter, Map, Representable, Zip};
-pub use image::{Field, Image};
+pub use grid::{Duplicate, GridIter, GridLike, Map, Representable, Shape, Zip};
+pub use image::{Grid, Image};
 pub use reader::Reader;
 pub use store::Store;
 pub use view::View;

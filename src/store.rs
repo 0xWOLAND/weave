@@ -76,6 +76,9 @@ impl<'a, State: Copy + 'a, A> Store<'a, State, A> {
     where
         I: IntoIterator<Item = State>,
     {
-        positions.into_iter().map(|position| self.peek(position)).collect()
+        positions
+            .into_iter()
+            .map(|position| self.peek(position))
+            .collect()
     }
 }

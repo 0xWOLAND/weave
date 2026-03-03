@@ -2,102 +2,130 @@ use std::{iter::FusedIterator, marker::PhantomData};
 
 use crate::{Reader, View};
 
-pub trait Grid {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Shape<const N: usize>(pub [usize; N]);
+
+impl<const N: usize> Shape<N> {
+    pub fn size(self) -> usize {
+        self.0.iter().product()
+    }
+
+    pub fn flatten(self, index: [usize; N]) -> usize {
+        let mut stride = 1;
+        let mut flat = 0;
+
+        for axis in (0..N).rev() {
+            flat += index[axis] * stride;
+            stride *= self.0[axis];
+        }
+
+        flat
+    }
+
+    pub fn unflatten(self, mut flat: usize) -> [usize; N] {
+        let mut index = [0; N];
+
+        for axis in (0..N).rev() {
+            let extent = self.0[axis];
+            index[axis] = flat % extent;
+            flat /= extent;
+        }
+
+        index
+    }
+}
+
+pub trait GridLike<const N: usize> {
     type Elem: Copy;
 
-    fn width(&self) -> usize;
-    fn height(&self) -> usize;
+    fn shape(&self) -> Shape<N>;
+    fn at(&self, index: [usize; N]) -> Self::Elem;
 
-    fn at(&self, x: usize, y: usize) -> Self::Elem;
-
-    fn iter(&self) -> GridIter<'_, Self>
+    fn iter(&self) -> GridIter<'_, Self, N>
     where
         Self: Sized,
     {
         GridIter::new(self)
     }
 
-    fn map<F, B>(self, f: F) -> Map<Self, F, B>
+    fn map<F, B>(self, f: F) -> Map<Self, F, B, N>
     where
         Self: Sized,
         F: Fn(Self::Elem) -> B,
         B: Copy,
     {
-        Map { grid: self, f, _marker: PhantomData }
+        Map {
+            grid: self,
+            f,
+            _marker: PhantomData,
+        }
     }
 
-    fn duplicate(&self) -> Duplicate<'_, Self>
+    fn duplicate(&self) -> Duplicate<'_, Self, N>
     where
         Self: Sized,
     {
         Duplicate { grid: self }
     }
 
-    fn extend<F, B>(&self, f: F) -> Map<Duplicate<'_, Self>, F, B>
+    fn extend<F, B>(&self, f: F) -> Map<Duplicate<'_, Self, N>, F, B, N>
     where
         Self: Sized,
-        F: for<'a> Fn(View<&'a Self>) -> B,
+        F: for<'a> Fn(View<&'a Self, N>) -> B,
         B: Copy,
     {
         self.duplicate().map(f)
     }
 
-    fn zip<H>(self, other: H) -> Zip<Self, H>
+    fn zip<H>(self, other: H) -> Zip<Self, H, N>
     where
         Self: Sized,
-        H: Grid,
+        H: GridLike<N>,
     {
-        assert_eq!(self.width(), other.width());
-        assert_eq!(self.height(), other.height());
-        Zip { left: self, right: other }
-    }
-}
-
-pub trait Representable: Grid {
-    type Index: Copy;
-
-    fn index(&self, i: Self::Index) -> Self::Elem;
-
-    fn tabulate(f: impl Fn(Self::Index) -> Self::Elem) -> Self;
-}
-
-pub struct GridIter<'a, G: Grid> {
-    grid: &'a G,
-    width: usize,
-    height: usize,
-    x: usize,
-    y: usize,
-}
-
-impl<'a, G: Grid> GridIter<'a, G> {
-    pub fn new(grid: &'a G) -> Self {
-        Self {
-            grid,
-            width: grid.width(),
-            height: grid.height(),
-            x: 0,
-            y: 0,
+        assert_eq!(self.shape(), other.shape());
+        Zip {
+            left: self,
+            right: other,
         }
     }
 }
 
-impl<G: Grid> Iterator for GridIter<'_, G> {
+pub trait Representable<const N: usize>: GridLike<N> {
+    fn tabulate(shape: [usize; N], f: impl Fn([usize; N]) -> Self::Elem) -> Self;
+}
+
+pub struct GridIter<'a, G: GridLike<N>, const N: usize> {
+    grid: &'a G,
+    shape: Shape<N>,
+    next: usize,
+    len: usize,
+}
+
+impl<'a, G: GridLike<N>, const N: usize> GridIter<'a, G, N> {
+    pub fn new(grid: &'a G) -> Self {
+        let shape = grid.shape();
+        let len = shape.size();
+
+        Self {
+            grid,
+            shape,
+            next: 0,
+            len,
+        }
+    }
+}
+
+impl<G: GridLike<N>, const N: usize> Iterator for GridIter<'_, G, N> {
     type Item = G::Elem;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.y == self.height {
+        if self.next == self.len {
             return None;
         }
 
-        let elem = self.grid.at(self.x, self.y);
-        self.x += 1;
-
-        if self.x == self.width {
-            self.x = 0;
-            self.y += 1;
-        }
-
-        Some(elem)
+        let index = self.shape.unflatten(self.next);
+        self.next += 1;
+        Some(self.grid.at(index))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -106,84 +134,88 @@ impl<G: Grid> Iterator for GridIter<'_, G> {
     }
 }
 
-impl<G: Grid> ExactSizeIterator for GridIter<'_, G> {
+impl<G: GridLike<N>, const N: usize> ExactSizeIterator for GridIter<'_, G, N> {
     fn len(&self) -> usize {
-        self.width * self.height - self.y * self.width - self.x
+        self.len - self.next
     }
 }
 
-impl<G: Grid> FusedIterator for GridIter<'_, G> {}
+impl<G: GridLike<N>, const N: usize> FusedIterator for GridIter<'_, G, N> {}
 
-impl<'a, G: Grid> From<&'a G> for Reader<'a, (usize, usize), G::Elem> {
+impl<'a, G: GridLike<N>, const N: usize> From<&'a G> for Reader<'a, [usize; N], G::Elem> {
     fn from(grid: &'a G) -> Self {
-        Reader::new(move |&(x, y)| grid.at(x, y))
+        Reader::new(move |index| grid.at(*index))
     }
 }
 
-impl<G: Grid> Grid for &G {
+impl<G: GridLike<N>, const N: usize> GridLike<N> for &G {
     type Elem = G::Elem;
 
-    fn width(&self) -> usize { (*self).width() }
-    fn height(&self) -> usize { (*self).height() }
+    fn shape(&self) -> Shape<N> {
+        (*self).shape()
+    }
 
-    fn at(&self, x: usize, y: usize) -> Self::Elem {
-        (*self).at(x, y)
+    fn at(&self, index: [usize; N]) -> Self::Elem {
+        (*self).at(index)
     }
 }
 
-pub struct Map<G, F, B> {
+pub struct Map<G, F, B, const N: usize> {
     grid: G,
     f: F,
     _marker: PhantomData<B>,
 }
 
-impl<G, F, B> Grid for Map<G, F, B>
+impl<G, F, B, const N: usize> GridLike<N> for Map<G, F, B, N>
 where
-    G: Grid,
+    G: GridLike<N>,
     F: Fn(G::Elem) -> B,
     B: Copy,
 {
     type Elem = B;
 
-    fn width(&self) -> usize { self.grid.width() }
-    fn height(&self) -> usize { self.grid.height() }
+    fn shape(&self) -> Shape<N> {
+        self.grid.shape()
+    }
 
-    fn at(&self, x: usize, y: usize) -> B {
-        (self.f)(self.grid.at(x, y))
+    fn at(&self, index: [usize; N]) -> B {
+        (self.f)(self.grid.at(index))
     }
 }
 
-pub struct Duplicate<'a, G: Grid> {
+pub struct Duplicate<'a, G: GridLike<N>, const N: usize> {
     grid: &'a G,
 }
 
-impl<'a, G: Grid> Grid for Duplicate<'a, G> {
-    type Elem = View<&'a G>;
+impl<'a, G: GridLike<N>, const N: usize> GridLike<N> for Duplicate<'a, G, N> {
+    type Elem = View<&'a G, N>;
 
-    fn width(&self) -> usize { self.grid.width() }
-    fn height(&self) -> usize { self.grid.height() }
+    fn shape(&self) -> Shape<N> {
+        self.grid.shape()
+    }
 
-    fn at(&self, x: usize, y: usize) -> Self::Elem {
-        View::new(self.grid, x, y)
+    fn at(&self, index: [usize; N]) -> Self::Elem {
+        View::new(self.grid, index)
     }
 }
 
-pub struct Zip<G, H> {
+pub struct Zip<G, H, const N: usize> {
     left: G,
     right: H,
 }
 
-impl<G, H> Grid for Zip<G, H>
+impl<G, H, const N: usize> GridLike<N> for Zip<G, H, N>
 where
-    G: Grid,
-    H: Grid,
+    G: GridLike<N>,
+    H: GridLike<N>,
 {
     type Elem = (G::Elem, H::Elem);
 
-    fn width(&self) -> usize { self.left.width() }
-    fn height(&self) -> usize { self.left.height() }
+    fn shape(&self) -> Shape<N> {
+        self.left.shape()
+    }
 
-    fn at(&self, x: usize, y: usize) -> Self::Elem {
-        (self.left.at(x, y), self.right.at(x, y))
+    fn at(&self, index: [usize; N]) -> Self::Elem {
+        (self.left.at(index), self.right.at(index))
     }
 }

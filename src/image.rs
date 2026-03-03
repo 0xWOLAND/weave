@@ -1,72 +1,52 @@
-use crate::{Grid, Representable};
+use crate::{GridLike, Representable, grid::Shape};
 
 #[derive(Clone)]
-pub struct Image<T: Copy> {
-    width: usize,
-    height: usize,
+pub struct Grid<T: Copy, const N: usize> {
+    pub shape: Shape<N>,
     pub data: Vec<T>,
 }
 
-impl<T: Copy> Image<T> {
-    pub fn new(width: usize, height: usize, data: Vec<T>) -> Self {
-        assert_eq!(data.len(), width * height);
-        Self { width, height, data }
+pub type Image<T> = Grid<T, 2>;
+
+impl<T: Copy, const N: usize> Grid<T, N> {
+    pub fn new(shape: [usize; N], data: Vec<T>) -> Self {
+        let shape = Shape(shape);
+        assert_eq!(data.len(), shape.size());
+        Self { shape, data }
     }
 }
 
-impl<G: Grid> From<&G> for Image<G::Elem> {
+impl<G: GridLike<N>, const N: usize> From<&G> for Grid<G::Elem, N> {
     fn from(grid: &G) -> Self {
-        let width = grid.width();
-        let height = grid.height();
-        let data: Vec<_> = grid.iter().collect();
-
-        Self::new(width, height, data)
+        Self {
+            shape: grid.shape(),
+            data: grid.iter().collect(),
+        }
     }
 }
 
-impl<T: Copy> Grid for Image<T> {
+impl<T: Copy, const N: usize> GridLike<N> for Grid<T, N> {
     type Elem = T;
 
-    fn width(&self) -> usize { self.width }
-    fn height(&self) -> usize { self.height }
+    fn shape(&self) -> Shape<N> {
+        self.shape
+    }
 
-    fn at(&self, x: usize, y: usize) -> T {
-        self.data[y * self.width + x]
+    fn at(&self, index: [usize; N]) -> T {
+        self.data[self.shape.flatten(index)]
     }
 }
 
-#[derive(Clone)]
-pub struct Field<const W: usize, const H: usize, T: Copy> {
-    data: Vec<T>,
-}
+impl<T: Copy, const N: usize> Representable<N> for Grid<T, N> {
+    fn tabulate(shape: [usize; N], f: impl Fn([usize; N]) -> Self::Elem) -> Self {
+        let shape = Shape(shape);
+        let len = shape.size();
+        let mut data = Vec::with_capacity(len);
 
-impl<const W: usize, const H: usize, T: Copy> Grid for Field<W, H, T> {
-    type Elem = T;
-
-    fn width(&self) -> usize { W }
-    fn height(&self) -> usize { H }
-
-    fn at(&self, x: usize, y: usize) -> T {
-        self.data[y * W + x]
-    }
-}
-
-impl<const W: usize, const H: usize, T: Copy> Representable for Field<W, H, T> {
-    type Index = (usize, usize);
-
-    fn index(&self, (x, y): Self::Index) -> Self::Elem {
-        <Self as Grid>::at(self, x, y)
-    }
-
-    fn tabulate(f: impl Fn(Self::Index) -> Self::Elem) -> Self {
-        let mut data = Vec::with_capacity(W * H);
-
-        for y in 0..H {
-            for x in 0..W {
-                data.push(f((x, y)));
-            }
+        for flat in 0..len {
+            data.push(f(shape.unflatten(flat)));
         }
 
-        Self { data }
+        Self { shape, data }
     }
 }
