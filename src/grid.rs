@@ -88,6 +88,19 @@ pub trait GridLike<const N: usize> {
             right: other,
         }
     }
+
+    fn remap<F>(&self, shape: [usize; N], fill: Self::Elem, f: F) -> Remap<'_, Self, F, N>
+    where
+        Self: Sized,
+        F: Fn([usize; N]) -> Option<[usize; N]>,
+    {
+        Remap {
+            grid: self,
+            shape: Shape(shape),
+            fill,
+            f,
+        }
+    }
 }
 
 pub trait Representable<const N: usize>: GridLike<N> {
@@ -217,5 +230,30 @@ where
 
     fn at(&self, index: [usize; N]) -> Self::Elem {
         (self.left.at(index), self.right.at(index))
+    }
+}
+
+pub struct Remap<'a, G: GridLike<N>, F, const N: usize> {
+    grid: &'a G,
+    shape: Shape<N>,
+    fill: G::Elem,
+    f: F,
+}
+
+impl<'a, G, F, const N: usize> GridLike<N> for Remap<'a, G, F, N>
+where
+    G: GridLike<N>,
+    F: Fn([usize; N]) -> Option<[usize; N]>,
+{
+    type Elem = G::Elem;
+
+    fn shape(&self) -> Shape<N> {
+        self.shape
+    }
+
+    fn at(&self, index: [usize; N]) -> Self::Elem {
+        (self.f)(index)
+            .map(|index| self.grid.at(index))
+            .unwrap_or(self.fill)
     }
 }

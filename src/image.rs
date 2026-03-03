@@ -1,3 +1,7 @@
+use std::path::Path;
+
+use image::{RgbaImage, error::ParameterError, error::ParameterErrorKind};
+
 use crate::{GridLike, Representable, grid::Shape};
 
 #[derive(Clone)]
@@ -13,6 +17,24 @@ impl<T: Copy, const N: usize> Grid<T, N> {
         let shape = Shape(shape);
         assert_eq!(data.len(), shape.size());
         Self { shape, data }
+    }
+}
+
+impl Grid<[u8; 4], 2> {
+    pub fn save_rgba(&self, path: impl AsRef<Path>) -> image::ImageResult<()> {
+        let [w, h] = self.shape.0;
+        let pixels = (0..h)
+            .flat_map(|y| (0..w).map(move |x| self.at([x, y])))
+            .flat_map(|rgba| rgba)
+            .collect();
+
+        RgbaImage::from_raw(w as u32, h as u32, pixels)
+            .ok_or_else(|| {
+                image::ImageError::Parameter(ParameterError::from_kind(
+                    ParameterErrorKind::DimensionMismatch,
+                ))
+            })?
+            .save(path)
     }
 }
 
