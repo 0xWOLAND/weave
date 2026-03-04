@@ -1,9 +1,11 @@
-# Notes on the Halide 
+# Notes on the Halide
 
 Halide is an image processing library designed to address the trilemma of 
 - Parallelism
 - Locality
 - Redundant compute mitigation
+
+For Weave, the important design boundary is that Halide's graph is treated as a compiler artifact, not the source-level mental model. Users should reason about image transformations and local sampling; any DAG or SSA form belongs strictly to lowering.
 
 Halide is equipped with a set of scheduling primitives (`compute_at`, `reorder`, and `tile`) that let the programmer specify "locality-incresing program transformations". But this requires determining the appropriate loop bounds and intermediate buffer sizes based on hardware requirements. The program DAG is equipped with this function bound information, and it helps inform program restructuring optimizations. 
 

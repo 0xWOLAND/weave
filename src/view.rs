@@ -1,33 +1,50 @@
 use std::iter::successors;
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::{GridLike, Store};
+use crate::Image;
 
 #[derive(Clone, Copy)]
-pub struct View<G: GridLike<N>, const N: usize> {
-    grid: G,
+pub struct View<I: Image<N>, const N: usize> {
+    image: I,
     position: [usize; N],
 }
 
-impl<G: GridLike<N>, const N: usize> View<G, N> {
-    pub fn new(grid: G, position: [usize; N]) -> Self {
-        Self { grid, position }
+impl<I: Image<N>, const N: usize> View<I, N> {
+    pub fn new(image: I, position: [usize; N]) -> Self {
+        Self { image, position }
     }
 
     pub fn shape(&self) -> crate::grid::Shape<N> {
-        self.grid.shape()
+        self.image.shape()
     }
 
     pub fn position(&self) -> [usize; N] {
         self.position
     }
 
-    pub fn extract(&self) -> G::Elem {
-        self.grid.at(self.position)
+    pub fn extract(&self) -> I::Pixel
+    where
+        I::Pixel: PartialOrd
+            + Add<Output = I::Pixel>
+            + Sub<Output = I::Pixel>
+            + Mul<Output = I::Pixel>
+            + Div<Output = I::Pixel>
+            + Neg<Output = I::Pixel>,
+    {
+        self.image.sample(self.position)
     }
 
-    pub fn get(&self, offset: [isize; N]) -> Option<G::Elem> {
+    pub fn get(&self, offset: [isize; N]) -> Option<I::Pixel>
+    where
+        I::Pixel: PartialOrd
+            + Add<Output = I::Pixel>
+            + Sub<Output = I::Pixel>
+            + Mul<Output = I::Pixel>
+            + Div<Output = I::Pixel>
+            + Neg<Output = I::Pixel>,
+    {
         let mut next = [0; N];
-        let shape = self.grid.shape();
+        let shape = self.image.shape();
 
         for axis in 0..N {
             let coord = self.position[axis] as isize + offset[axis];
@@ -39,7 +56,43 @@ impl<G: GridLike<N>, const N: usize> View<G, N> {
             next[axis] = coord as usize;
         }
 
-        Some(self.grid.at(next))
+        Some(self.image.sample(next))
+    }
+
+    pub fn sample_at(&self, index: [usize; N]) -> Option<I::Pixel>
+    where
+        I::Pixel: PartialOrd
+            + Add<Output = I::Pixel>
+            + Sub<Output = I::Pixel>
+            + Mul<Output = I::Pixel>
+            + Div<Output = I::Pixel>
+            + Neg<Output = I::Pixel>,
+    {
+        let shape = self.image.shape();
+
+        for axis in 0..N {
+            if index[axis] >= shape.0[axis] {
+                return None;
+            }
+        }
+
+        Some(self.image.sample(index))
+    }
+
+    pub fn collect<Pos>(&self, positions: Pos) -> Vec<I::Pixel>
+    where
+        Pos: IntoIterator<Item = [usize; N]>,
+        I::Pixel: PartialOrd
+            + Add<Output = I::Pixel>
+            + Sub<Output = I::Pixel>
+            + Mul<Output = I::Pixel>
+            + Div<Output = I::Pixel>
+            + Neg<Output = I::Pixel>,
+    {
+        positions
+            .into_iter()
+            .filter_map(|index| self.sample_at(index))
+            .collect()
     }
 
     pub fn iterate<A, F>(&self, seed: A, step: F) -> impl Iterator<Item = A>
@@ -48,12 +101,5 @@ impl<G: GridLike<N>, const N: usize> View<G, N> {
         F: Fn(A) -> A,
     {
         successors(Some(seed), move |&state| Some(step(state)))
-    }
-}
-
-impl<'a, G: GridLike<N>, const N: usize> From<View<&'a G, N>> for Store<'a, [usize; N], G::Elem> {
-    fn from(view: View<&'a G, N>) -> Self {
-        let grid = view.grid;
-        Store::new(view.position, move |position| grid.at(position))
     }
 }
