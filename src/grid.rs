@@ -104,7 +104,7 @@ pub trait GridLike<const N: usize> {
 }
 
 pub trait Representable<const N: usize>: GridLike<N> {
-    fn tabulate(shape: [usize; N], f: impl Fn([usize; N]) -> Self::Elem) -> Self;
+    fn tabulate(shape: [usize; N], f: impl FnMut([usize; N]) -> Self::Elem) -> Self;
 }
 
 pub struct GridIter<'a, G: GridLike<N>, const N: usize> {

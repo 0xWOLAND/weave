@@ -60,7 +60,7 @@ impl<T: Copy, const N: usize> GridLike<N> for Grid<T, N> {
 }
 
 impl<T: Copy, const N: usize> Representable<N> for Grid<T, N> {
-    fn tabulate(shape: [usize; N], f: impl Fn([usize; N]) -> Self::Elem) -> Self {
+    fn tabulate(shape: [usize; N], mut f: impl FnMut([usize; N]) -> Self::Elem) -> Self {
         let shape = Shape(shape);
         let len = shape.size();
         let mut data = Vec::with_capacity(len);
