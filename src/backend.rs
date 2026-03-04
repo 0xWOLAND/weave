@@ -1,3 +1,5 @@
+use std::ops::{Add, Div, Mul, Neg, Sub};
+
 use melior::{
     Context, ExecutionEngine,
     dialect::{DialectRegistry, arith, func, memref, scf},
@@ -114,6 +116,13 @@ pub trait KernelBackend<const N: usize, T: Copy> {
 
 pub trait Arithmetic<const N: usize, T: Copy>: KernelBackend<N, T> {
     fn literal(&mut self, value: T) -> Result<Self::Scalar, LoweringError>;
+    fn gt(&mut self, lhs: Self::Scalar, rhs: Self::Scalar) -> Result<Self::Bool, LoweringError>;
+    fn select(
+        &mut self,
+        condition: Self::Bool,
+        if_true: Self::Scalar,
+        if_false: Self::Scalar,
+    ) -> Result<Self::Scalar, LoweringError>;
     fn add(&mut self, lhs: Self::Scalar, rhs: Self::Scalar) -> Result<Self::Scalar, LoweringError>;
     fn sub(&mut self, lhs: Self::Scalar, rhs: Self::Scalar) -> Result<Self::Scalar, LoweringError>;
     fn mul(&mut self, lhs: Self::Scalar, rhs: Self::Scalar) -> Result<Self::Scalar, LoweringError>;
@@ -483,7 +492,14 @@ where
 
 impl<const N: usize, G> Backend<N, G> for CpuBackend
 where
-    G: LowerableGrid<N, Elem = f32>,
+    G: LowerableGrid<N>,
+    G::Elem: Copy
+        + PartialOrd
+        + Add<Output = G::Elem>
+        + Sub<Output = G::Elem>
+        + Mul<Output = G::Elem>
+        + Div<Output = G::Elem>
+        + Neg<Output = G::Elem>,
 {
     type Output = Grid<G::Elem, N>;
 
@@ -710,21 +726,30 @@ where
     }
 }
 
-impl<const N: usize> KernelBackend<N, f32> for CpuEval {
-    type Scalar = f32;
+impl<T, const N: usize> KernelBackend<N, T> for CpuEval
+where
+    T: Copy
+        + PartialOrd
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Mul<Output = T>
+        + Div<Output = T>
+        + Neg<Output = T>,
+{
+    type Scalar = T;
     type Bool = bool;
-    type MaybeScalar = Option<f32>;
+    type MaybeScalar = Option<T>;
     type Index = [usize; N];
     type MaybeIndex = Option<[usize; N]>;
     type View<'g, G>
-        = CpuView<'g, G, f32, N>
+        = CpuView<'g, G, T, N>
     where
-        G: LowerableGrid<N, Elem = f32> + ?Sized + 'g;
+        G: LowerableGrid<N, Elem = T> + ?Sized + 'g;
 
     fn load_source(
         &mut self,
         _source_ordinal: usize,
-        grid: &Grid<f32, N>,
+        grid: &Grid<T, N>,
         index: Self::Index,
     ) -> Result<Self::Scalar, LoweringError> {
         Ok(grid.at(index))
@@ -766,7 +791,7 @@ impl<const N: usize> KernelBackend<N, f32> for CpuEval {
         arg_offset: usize,
     ) -> Self::View<'g, G>
     where
-        G: LowerableGrid<N, Elem = f32> + ?Sized + 'g,
+        G: LowerableGrid<N, Elem = T> + ?Sized + 'g,
     {
         CpuView {
             grid,
@@ -778,7 +803,7 @@ impl<const N: usize> KernelBackend<N, f32> for CpuEval {
 
     fn extract<'g, G>(&mut self, view: &Self::View<'g, G>) -> Result<Self::Scalar, LoweringError>
     where
-        G: LowerableGrid<N, Elem = f32> + ?Sized + 'g,
+        G: LowerableGrid<N, Elem = T> + ?Sized + 'g,
     {
         let mut cursor = view.arg_offset;
         view.grid.eval_with(self, view.index, &mut cursor)
@@ -790,7 +815,7 @@ impl<const N: usize> KernelBackend<N, f32> for CpuEval {
         offset: [isize; N],
     ) -> Result<Self::MaybeScalar, LoweringError>
     where
-        G: LowerableGrid<N, Elem = f32> + ?Sized + 'g,
+        G: LowerableGrid<N, Elem = T> + ?Sized + 'g,
     {
         let mut index = [0; N];
         for axis in 0..N {
@@ -816,11 +841,11 @@ impl<const N: usize> KernelBackend<N, f32> for CpuEval {
         &mut self,
         grid: &G,
         mapped: Self::MaybeIndex,
-        fill: f32,
+        fill: T,
         arg_offset: usize,
     ) -> Result<Self::Scalar, LoweringError>
     where
-        G: LowerableGrid<N, Elem = f32> + ?Sized,
+        G: LowerableGrid<N, Elem = T> + ?Sized,
     {
         let Some(index) = mapped else { return Ok(fill) };
         if !in_bounds(grid.shape(), index) {
@@ -831,23 +856,43 @@ impl<const N: usize> KernelBackend<N, f32> for CpuEval {
     }
 }
 
-impl<const N: usize> Arithmetic<N, f32> for CpuEval {
-    fn literal(&mut self, value: f32) -> Result<Self::Scalar, LoweringError> {
+impl<T, const N: usize> Arithmetic<N, T> for CpuEval
+where
+    T: Copy
+        + PartialOrd
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Mul<Output = T>
+        + Div<Output = T>
+        + Neg<Output = T>,
+{
+    fn literal(&mut self, value: T) -> Result<Self::Scalar, LoweringError> {
         Ok(value)
     }
-    fn add(&mut self, lhs: f32, rhs: f32) -> Result<f32, LoweringError> {
+    fn gt(&mut self, lhs: T, rhs: T) -> Result<Self::Bool, LoweringError> {
+        Ok(lhs > rhs)
+    }
+    fn select(
+        &mut self,
+        condition: Self::Bool,
+        if_true: Self::Scalar,
+        if_false: Self::Scalar,
+    ) -> Result<Self::Scalar, LoweringError> {
+        Ok(if condition { if_true } else { if_false })
+    }
+    fn add(&mut self, lhs: T, rhs: T) -> Result<T, LoweringError> {
         Ok(lhs + rhs)
     }
-    fn sub(&mut self, lhs: f32, rhs: f32) -> Result<f32, LoweringError> {
+    fn sub(&mut self, lhs: T, rhs: T) -> Result<T, LoweringError> {
         Ok(lhs - rhs)
     }
-    fn mul(&mut self, lhs: f32, rhs: f32) -> Result<f32, LoweringError> {
+    fn mul(&mut self, lhs: T, rhs: T) -> Result<T, LoweringError> {
         Ok(lhs * rhs)
     }
-    fn div(&mut self, lhs: f32, rhs: f32) -> Result<f32, LoweringError> {
+    fn div(&mut self, lhs: T, rhs: T) -> Result<T, LoweringError> {
         Ok(lhs / rhs)
     }
-    fn neg(&mut self, value: f32) -> Result<f32, LoweringError> {
+    fn neg(&mut self, value: T) -> Result<T, LoweringError> {
         Ok(-value)
     }
 }
@@ -1098,6 +1143,33 @@ impl<'b, 'c, const N: usize> KernelBackend<N, f32> for MlirEval<'b, 'c, f32, N> 
 impl<'b, 'c, const N: usize> Arithmetic<N, f32> for MlirEval<'b, 'c, f32, N> {
     fn literal(&mut self, value: f32) -> Result<Self::Scalar, LoweringError> {
         lower_scalar_constant::<f32>(self.block, self.context, self.location, value)
+    }
+    fn gt(&mut self, lhs: Self::Scalar, rhs: Self::Scalar) -> Result<Self::Bool, LoweringError> {
+        let op = self.block.append_operation(arith::cmpf(
+            self.context,
+            arith::CmpfPredicate::Ogt,
+            lhs,
+            rhs,
+            self.location,
+        ));
+        op.result(0)
+            .map(|value| value_to_context(value.into()))
+            .map_err(|_| LoweringError::BackendConstruction("arith.cmpf returned no value".into()))
+    }
+    fn select(
+        &mut self,
+        condition: Self::Bool,
+        if_true: Self::Scalar,
+        if_false: Self::Scalar,
+    ) -> Result<Self::Scalar, LoweringError> {
+        let op =
+            self.block
+                .append_operation(arith::select(condition, if_true, if_false, self.location));
+        op.result(0)
+            .map(|value| value_to_context(value.into()))
+            .map_err(|_| {
+                LoweringError::BackendConstruction("arith.select returned no value".into())
+            })
     }
     fn add(&mut self, lhs: Self::Scalar, rhs: Self::Scalar) -> Result<Self::Scalar, LoweringError> {
         lower_float_bin(
