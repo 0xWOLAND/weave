@@ -1,30 +1,16 @@
-use weave::{
-    Arithmetic, ExtendKernel, Grid, GridLike, LowerableGrid, LoweringError, MeliorBackend,
-    Representable,
-};
+use weave::{Grid, View};
 
-struct Blur;
+fn blur_pixel(image: &Grid<f32, 2>, index: [usize; 2]) -> f32 {
+    let view = View::new(image, index);
+    let mut sum = 0.0_f32;
 
-impl ExtendKernel<f32, 2> for Blur {
-    fn apply<B: Arithmetic<2, f32>, G: LowerableGrid<2, Elem = f32> + ?Sized>(
-        &self,
-        backend: &mut B,
-        view: B::View<'_, G>,
-    ) -> Result<B::Scalar, LoweringError> {
-        let zero = backend.literal(0.0)?;
-        let one_twenty_fifth = backend.literal(0.04)?;
-        let mut sum = zero.clone();
-
-        for dx in -2..=2 {
-            for dy in -2..=2 {
-                let sampled = backend.get(&view, [dx, dy])?;
-                let sample = backend.unwrap_or(sampled, zero.clone())?;
-                sum = backend.add(sum, sample)?;
-            }
+    for dx in -2..=2 {
+        for dy in -2..=2 {
+            sum += view.get([dx, dy]).unwrap_or(0.0);
         }
-
-        backend.mul(sum, one_twenty_fifth)
     }
+
+    sum * 0.04
 }
 
 fn main() -> image::ImageResult<()> {
@@ -42,14 +28,10 @@ fn main() -> image::ImageResult<()> {
             .collect(),
     );
 
-    let blurred = gray
-        .staged()
-        .extend(Blur)
-        .materialize_with::<MeliorBackend>()
-        .expect("execute staged blur pipeline");
+    let blurred = Grid::tabulate([w, h], |index| blur_pixel(&gray, index));
 
     let output = Grid::tabulate([w, h], |[x, y]| {
-        let value = (blurred.at([x, y]).clamp(0.0, 1.0) * 255.0).round() as u8;
+        let value = (blurred.sample([x, y]).clamp(0.0, 1.0) * 255.0).round() as u8;
         [value, value, value, 255]
     });
 

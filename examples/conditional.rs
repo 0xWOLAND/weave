@@ -1,27 +1,4 @@
-use weave::{
-    Arithmetic, Grid, GridLike, LowerableGrid, LoweringError, MapKernel, MeliorBackend,
-    Representable,
-};
-
-struct Threshold {
-    cutoff: f32,
-    low: f32,
-    high: f32,
-}
-
-impl MapKernel<f32, 2> for Threshold {
-    fn apply<B: Arithmetic<2, f32>>(
-        &self,
-        backend: &mut B,
-        value: B::Scalar,
-    ) -> Result<B::Scalar, LoweringError> {
-        let cutoff = backend.literal(self.cutoff)?;
-        let low = backend.literal(self.low)?;
-        let high = backend.literal(self.high)?;
-        let is_bright = backend.gt(value, cutoff)?;
-        backend.select(is_bright, high, low)
-    }
-}
+use weave::{Grid, ImageExt, MeliorBackend};
 
 fn main() -> image::ImageResult<()> {
     let raw = image::open("input.png")?.to_luma8();
@@ -38,18 +15,14 @@ fn main() -> image::ImageResult<()> {
             .collect(),
     );
 
-    let thresholded = gray
-        .staged()
-        .map(Threshold {
-            cutoff: 0.5,
-            low: 0.0,
-            high: 1.0,
-        })
+    let thresholded = (&gray)
+        .mul_const(1.0)
+        .threshold(0.5_f32, 1.0_f32, 0.0_f32)
         .materialize_with::<MeliorBackend>()
-        .expect("execute staged threshold pipeline");
+        .expect("materialize arithmetic image with MLIR");
 
     let output = Grid::tabulate([w, h], |[x, y]| {
-        let value = (thresholded.at([x, y]).clamp(0.0, 1.0) * 255.0).round() as u8;
+        let value = (thresholded.sample([x, y]).clamp(0.0, 1.0) * 255.0).round() as u8;
         [value, value, value, 255]
     });
 
